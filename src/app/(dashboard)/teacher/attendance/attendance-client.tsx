@@ -23,6 +23,8 @@ import {
   Copy,
   ExternalLink,
   Check,
+  MapPin,
+  Crosshair,
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
@@ -393,20 +395,24 @@ function CreateSessionModal({ classes, onClose }: { classes: ClassOption[]; onCl
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Durasi QR (menit)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Durasi QR</label>
             <select
               name="duration"
-              defaultValue="30"
+              defaultValue="10"
               className="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-sm outline-none focus:border-[#0d5c63] focus:bg-white focus:ring-2 focus:ring-[#0d5c63]/20 transition-all"
             >
+              <option value="5">5 menit (sangat ketat)</option>
+              <option value="10">10 menit (rekomendasi)</option>
               <option value="15">15 menit</option>
               <option value="30">30 menit</option>
               <option value="45">45 menit</option>
               <option value="60">60 menit</option>
               <option value="120">2 jam</option>
             </select>
-            <p className="text-xs text-gray-400 mt-1">QR code akan kedaluwarsa setelah durasi ini</p>
+            <p className="text-xs text-gray-400 mt-1">Durasi pendek mengurangi peluang nitip absen</p>
           </div>
+
+          <GeofenceField />
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
@@ -697,6 +703,142 @@ function SessionDetailModal({ session, onClose }: { session: SessionDetail; onCl
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─── Geofence Field (in Create Session form) ─── */
+
+function GeofenceField() {
+  const [enabled, setEnabled] = useState(false);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function detectLocation() {
+    setError("");
+    if (!("geolocation" in navigator)) {
+      setError("Browser tidak mendukung geolocation");
+      return;
+    }
+    setLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLoading(false);
+      },
+      (err) => {
+        setLoading(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setError("Izin lokasi ditolak. Aktifkan di pengaturan browser.");
+        } else if (err.code === err.TIMEOUT) {
+          setError("Timeout mencari lokasi. Coba lagi.");
+        } else {
+          setError("Gagal mendapatkan lokasi");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+        <input
+          type="checkbox"
+          name="useGeo"
+          checked={enabled}
+          onChange={(e) => {
+            setEnabled(e.target.checked);
+            if (!e.target.checked) {
+              setCoords(null);
+              setError("");
+            }
+          }}
+          className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#0d5c63] focus:ring-[#0d5c63]"
+        />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+            <MapPin size={13} className="text-[#0d5c63]" />
+            Verifikasi Lokasi (Geofence)
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Siswa hanya bisa absen saat berada dalam radius yang ditentukan dari kelas Anda.
+          </p>
+        </div>
+      </label>
+
+      {enabled && (
+        <div className="ml-7 space-y-3 pt-1">
+          {/* Detect location button */}
+          {!coords ? (
+            <button
+              type="button"
+              onClick={detectLocation}
+              disabled={loading}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[#0d5c63]/10 text-[#0d5c63] text-sm font-semibold hover:bg-[#0d5c63]/20 transition-colors disabled:opacity-60"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
+              {loading ? "Mendeteksi lokasi..." : "Gunakan Lokasi Sekarang"}
+            </button>
+          ) : (
+            <div className="bg-teal-50 border border-teal-100 rounded-lg p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-start gap-2 min-w-0">
+                  <Check size={14} className="text-teal-600 mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-teal-800">Lokasi terdeteksi</p>
+                    <p className="text-[10px] text-teal-600 font-mono truncate">
+                      {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={detectLocation}
+                  className="text-[10px] font-medium text-teal-700 hover:underline shrink-0"
+                >
+                  Ulangi
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Hidden inputs for form submission */}
+          <input type="hidden" name="latitude" value={coords?.lat ?? ""} />
+          <input type="hidden" name="longitude" value={coords?.lng ?? ""} />
+
+          {/* Radius */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Radius maksimum (meter)
+            </label>
+            <select
+              name="radius"
+              defaultValue="50"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm outline-none focus:border-[#0d5c63] focus:bg-white focus:ring-2 focus:ring-[#0d5c63]/20 transition-all"
+            >
+              <option value="20">20m (sangat ketat — dalam kelas)</option>
+              <option value="50">50m (rekomendasi — area kelas)</option>
+              <option value="100">100m (gedung sekolah)</option>
+              <option value="200">200m (longgar)</option>
+              <option value="500">500m (sangat longgar)</option>
+            </select>
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-600 flex items-center gap-1.5">
+              <AlertTriangle size={12} />
+              {error}
+            </p>
+          )}
+
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+            <strong>Tip:</strong> Aktifkan saat Anda berada di dalam kelas, lalu klik &quot;Gunakan Lokasi Sekarang&quot;.
+            Lokasi akan menjadi titik pusat radius.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

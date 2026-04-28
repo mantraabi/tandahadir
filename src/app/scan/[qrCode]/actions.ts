@@ -146,26 +146,29 @@ export async function submitAttendance(
       return { success: false, error: "Anda sudah melakukan absensi sebelumnya" };
     }
 
-    // Optional geofence check
-    let withinRadius = true;
-    let distance: number | null = null;
-    if (
+    // Geofence check — enforce if session requires it
+    const sessionRequiresGeo =
       session.latitude != null &&
       session.longitude != null &&
-      session.radius != null &&
-      geo
-    ) {
-      distance = distanceMeters(
-        session.latitude,
-        session.longitude,
+      session.radius != null;
+
+    if (sessionRequiresGeo) {
+      if (!geo) {
+        return {
+          success: false,
+          error: "Sesi ini memerlukan verifikasi lokasi. Aktifkan izin GPS pada browser Anda.",
+        };
+      }
+      const distance = distanceMeters(
+        session.latitude!,
+        session.longitude!,
         geo.latitude,
         geo.longitude
       );
-      withinRadius = distance <= session.radius;
-      if (!withinRadius) {
+      if (distance > session.radius!) {
         return {
           success: false,
-          error: `Anda berada ${Math.round(distance)}m dari lokasi sesi (maks ${session.radius}m).`,
+          error: `Anda berada ${Math.round(distance)}m dari lokasi kelas (maks ${session.radius}m). Mohon datang ke kelas untuk absen.`,
         };
       }
     }

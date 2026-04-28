@@ -33,6 +33,34 @@ export async function createAttendanceSession(formData: FormData): Promise<Actio
     const subject = (formData.get("subject") as string) || null;
     const durationMin = parseInt(formData.get("duration") as string) || 30;
 
+    // Optional geofence
+    const useGeo = formData.get("useGeo") === "on";
+    const latStr = formData.get("latitude") as string | null;
+    const lngStr = formData.get("longitude") as string | null;
+    const radiusStr = formData.get("radius") as string | null;
+
+    let latitude: number | null = null;
+    let longitude: number | null = null;
+    let radius: number | null = null;
+
+    if (useGeo) {
+      const lat = parseFloat(latStr ?? "");
+      const lng = parseFloat(lngStr ?? "");
+      const r = parseInt(radiusStr ?? "");
+      if (Number.isNaN(lat) || Number.isNaN(lng) || Number.isNaN(r)) {
+        return {
+          success: false,
+          error: "Lokasi tidak valid. Klik 'Gunakan Lokasi Sekarang' atau matikan verifikasi lokasi.",
+        };
+      }
+      if (r < 10 || r > 1000) {
+        return { success: false, error: "Radius harus antara 10 - 1000 meter" };
+      }
+      latitude = lat;
+      longitude = lng;
+      radius = r;
+    }
+
     if (!classId) {
       return { success: false, error: "Pilih kelas terlebih dahulu" };
     }
@@ -75,6 +103,9 @@ export async function createAttendanceSession(formData: FormData): Promise<Actio
         qrCode,
         qrExpiresAt,
         status: "ACTIVE",
+        latitude,
+        longitude,
+        radius,
       },
     });
 
