@@ -1,0 +1,65 @@
+// src/app/(dashboard)/teacher/attendance/page.tsx
+
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db/prisma";
+import { AttendanceClient } from "./attendance-client";
+
+export const dynamic = "force-dynamic";
+
+export default async function TeacherAttendancePage() {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (session.user.role !== "TEACHER" && session.user.role !== "ADMIN") {
+    redirect("/unauthorized");
+  }
+
+  const teacherId = session.user.id as string;
+
+  const [sessionsRaw, classesRaw] = await Promise.all([
+    prisma.attendanceSession.findMany({
+      where: { createdById: teacherId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        class: {
+          select: {
+            name: true,
+            _count: { select: { students: { where: { status: "ACTIVE" } } } },
+          },
+        },
+        attendances: { select: { status: true } },
+      },
+    }),
+    prisma.class.findMany({
+      where: { teacherId, isActive: true },
+      orderBy: [{ grade: "asc" }, { name: "asc" }],
+      include: {
+        _count: { select: { students: { where: { status: "ACTIVE" } } } },
+      },
+    }),
+  ]);
+
+  const sessions = sessionsRaw.map((s) => ({
+    id: s.id,
+    classId: s.classId,
+    className: s.class.name,
+    date: s.date.toISOString(),
+    subject: s.subject,
+    qrCode: s.qrCode,
+    qrExpiresAt: s.qrExpiresAt.toISOString(),
+    status: s.status,
+    createdAt: s.createdAt.toISOString(),
+    presentCount: s.attendances.filter((a) => a.status === "PRESENT").length,
+    totalCount: s.attendances.length,
+    studentCount: s.class._count.students,
+  }));
+
+  const classes = classesRaw.map((c) => ({
+    id: c.id,
+    name: c.name,
+    studentCount: c._count.students,
+  }));
+
+  return <AttendanceClient sessions={sessions} classes={classes} />;
+}

@@ -1,0 +1,181 @@
+"use server";
+
+// src/app/(dashboard)/admin/settings/actions.ts
+
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db/prisma";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import bcrypt from "bcryptjs";
+
+type ActionResult = {
+  success: boolean;
+  error?: string;
+};
+
+async function requireAdmin() {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "ADMIN") {
+    throw new Error("Unauthorized");
+  }
+  return session.user;
+}
+
+// ─── School Profile ───
+
+const schoolSchema = z.object({
+  name: z.string().min(2, "Nama sekolah minimal 2 karakter"),
+  address: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email("Format email tidak valid").optional().or(z.literal("")),
+  principal: z.string().optional(),
+  npsn: z.string().optional(),
+});
+
+export async function updateSchoolProfile(formData: FormData): Promise<ActionResult> {
+  try {
+    await requireAdmin();
+
+    const raw = {
+      name: formData.get("name") as string,
+      address: (formData.get("address") as string) || undefined,
+      phone: (formData.get("phone") as string) || undefined,
+      email: (formData.get("email") as string) || "",
+      principal: (formData.get("principal") as string) || undefined,
+      npsn: (formData.get("npsn") as string) || undefined,
+    };
+
+    const parsed = schoolSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const school = await prisma.school.findFirst();
+    if (school) {
+      await prisma.school.update({
+        where: { id: school.id },
+        data: {
+          name: parsed.data.name,
+          address: parsed.data.address ?? null,
+          phone: parsed.data.phone ?? null,
+          email: parsed.data.email || null,
+          principal: parsed.data.principal ?? null,
+          npsn: parsed.data.npsn ?? null,
+        },
+      });
+    } else {
+      await prisma.school.create({
+        data: {
+          name: parsed.data.name,
+          address: parsed.data.address ?? null,
+          phone: parsed.data.phone ?? null,
+          email: parsed.data.email || null,
+          principal: parsed.data.principal ?? null,
+          npsn: parsed.data.npsn ?? null,
+        },
+      });
+    }
+
+    revalidatePath("/admin/settings");
+    return { success: true };
+  } catch {
+    return { success: false, error: "Gagal menyimpan profil sekolah" };
+  }
+}
+
+// ─── Change Admin Password ───
+
+const passwordSchema = z.object({
+  currentPassword: z.string().min(6, "Password minimal 6 karakter"),
+  newPassword: z.string().min(6, "Password baru minimal 6 karakter"),
+  confirmPassword: z.string().min(6, "Konfirmasi password minimal 6 karakter"),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Password baru tidak sama",
+  path: ["confirmPassword"],
+});
+
+export async function changePassword(formData: FormData): Promise<ActionResult> {
+  try {
+    const admin = await requireAdmin();
+
+    const raw = {
+      currentPassword: formData.get("currentPassword") as string,
+      newPassword: formData.get("newPassword") as string,
+      confirmPassword: formData.get("confirmPassword") as string,
+    };
+
+    const parsed = passwordSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: admin.id } });
+    if (!user) {
+      return { success: false, error: "User tidak ditemukan" };
+    }
+
+    const match = await bcrypt.compare(parsed.data.currentPassword, user.password);
+    if (!match) {
+      return { success: false, error: "Password saat ini salah" };
+    }
+
+    const hashed = await bcrypt.hash(parsed.data.newPassword, 12);
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: { password: hashed },
+    });
+
+    return { success: true };
+  } catch {
+    return { success: false, error: "Gagal mengubah password" };
+  }
+}
+
+// ─── Update Admin Profile ───
+
+const profileSchema = z.object({
+  name: z.string().min(2, "Nama minimal 2 karakter"),
+  email: z.string().email("Format email tidak valid"),
+  phone: z.string().optional(),
+});
+
+export async function updateAdminProfile(formData: FormData): Promise<ActionResult> {
+  try {
+    const admin = await requireAdmin();
+
+    const raw = {
+      name: formData.get("name") as string,
+      email: formData.get("email") as string,
+      phone: (formData.get("phone") as string) || undefined,
+    };
+
+    const parsed = profileSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0].message };
+    }
+
+    // Check email uniqueness
+    if (parsed.data.email !== admin.email) {
+      const existing = await prisma.user.findUnique({
+        where: { email: parsed.data.email },
+      });
+      if (existing) {
+        return { success: false, error: "Email sudah digunakan" };
+      }
+    }
+
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: {
+        name: parsed.data.name,
+        email: parsed.data.email,
+        phone: parsed.data.phone ?? null,
+      },
+    });
+
+    revalidatePath("/admin/settings");
+    return { success: true };
+  } catch {
+    return { success: false, error: "Gagal menyimpan profil admin" };
+  }
+}

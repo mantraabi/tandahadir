@@ -1,0 +1,295 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==================== LICENSE ====================
+
+model License {
+  id            String        @id @default(cuid())
+  key           String        @unique
+  schoolName    String
+  status        LicenseStatus @default(TRIAL)
+  trialEndsAt   DateTime
+  licenseEndsAt DateTime?
+  activatedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("licenses")
+}
+
+enum LicenseStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  BLOCKED
+}
+
+// ==================== SCHOOL ====================
+
+model School {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  logoUrl   String?
+  principal String?
+  npsn      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("schools")
+}
+
+// ==================== USER ====================
+
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String
+  password    String
+  role        UserRole
+  phone       String?
+  avatarUrl   String?
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  classes     Class[] 
+  sessions    AttendanceSession[]
+  createdDocs Document[]          @relation("CreatedBy")
+  signatures  Signature[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  TEACHER
+}
+
+// ==================== CLASS ====================
+
+model Class {
+  id        String   @id @default(cuid())
+  name      String
+  grade     String?
+  teacherId String?
+  teacher   User?    @relation(fields: [teacherId], references: [id])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students Student[]
+  sessions AttendanceSession[]
+
+  @@map("classes")
+}
+
+// ==================== STUDENT ====================
+
+model Student {
+  id          String        @id @default(cuid())
+  nisn        String?       @unique
+  nis         String?
+  name        String
+  gender      Gender?
+  birthDate   DateTime?
+  address     String?
+  parentName  String?
+  parentPhone String?
+  photoUrl    String?
+  classId     String
+  class       Class         @relation(fields: [classId], references: [id])
+  status      StudentStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  attendances Attendance[]
+
+  @@map("students")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+}
+
+// ==================== ATTENDANCE ====================
+
+model AttendanceSession {
+  id          String        @id @default(cuid())
+  classId     String
+  class       Class         @relation(fields: [classId], references: [id])
+  createdById String
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  date        DateTime      @db.Date
+  subject     String?
+  qrCode      String        @unique
+  qrExpiresAt DateTime
+  latitude    Float?
+  longitude   Float?
+  radius      Int?          @default(100)
+  status      SessionStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+
+  attendances Attendance[]
+
+  @@map("attendance_sessions")
+}
+
+enum SessionStatus {
+  ACTIVE
+  CLOSED
+  EXPIRED
+  CANCELLED
+}
+
+model Attendance {
+  id         String            @id @default(cuid())
+  sessionId  String
+  session    AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId  String
+  student    Student           @relation(fields: [studentId], references: [id])
+  status     AttendStatus
+  method     CheckMethod
+  checkInAt  DateTime          @default(now())
+  latitude   Float?
+  longitude  Float?
+  deviceInfo String?
+
+  @@unique([sessionId, studentId])
+  @@map("attendances")
+}
+
+enum AttendStatus {
+  PRESENT
+  ABSENT
+  LATE
+  SICK
+  PERMIT
+}
+
+enum CheckMethod {
+  QR
+  MANUAL
+  FACE
+}
+
+// ==================== DOCUMENT ====================
+
+model Document {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  fileUrl     String
+  signedUrl   String?
+  createdById String
+  creator     User      @relation("CreatedBy", fields: [createdById], references: [id])
+  status      DocStatus @default(DRAFT)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  recipients Recipient[]
+  signatures Signature[]
+
+  @@map("documents")
+}
+
+enum DocStatus {
+  DRAFT
+  SENT
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Recipient {
+  id             String        @id @default(cuid())
+  documentId     String
+  document       Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  name           String
+  email          String?
+  phone          String?
+  role           RecipientRole
+  status         SignStatus     @default(PENDING)
+  signedAt       DateTime?
+  orderIndex     Int            @default(0)
+  token          String         @unique @default(cuid())
+  tokenExpiresAt DateTime?
+
+  @@map("recipients")
+}
+
+enum RecipientRole {
+  ORANG_TUA
+  GURU
+  MURID
+  WALI_KELAS
+  KEPALA_SEKOLAH
+}
+
+enum SignStatus {
+  PENDING
+  OPENED
+  SIGNED
+  DECLINED
+}
+
+model Signature {
+  id           String   @id @default(cuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+  recipientId  String?
+  signatureUrl String
+  ipAddress    String
+  userAgent    String
+  signedAt     DateTime @default(now())
+
+  @@map("signatures")
+}
+
+// ==================== NOTIFICATION ====================
+
+model NotificationLog {
+  id        String      @id @default(cuid())
+  type      NotifType
+  recipient String
+  message   String
+  status    NotifStatus @default(PENDING)
+  sentAt    DateTime?
+  error     String?
+  metadata  Json?
+  createdAt DateTime    @default(now())
+
+  @@map("notification_logs")
+}
+
+enum NotifType {
+  WHATSAPP
+  EMAIL
+}
+
+enum NotifStatus {
+  PENDING
+  SENT
+  FAILED
+}
