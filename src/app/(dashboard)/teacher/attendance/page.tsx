@@ -16,7 +16,7 @@ export default async function TeacherAttendancePage() {
 
   const teacherId = session.user.id as string;
 
-  const [sessionsRaw, classesRaw] = await Promise.all([
+  const [sessionsRaw, classesRaw, schoolRaw] = await Promise.all([
     prisma.attendanceSession.findMany({
       where: { createdById: teacherId },
       orderBy: { createdAt: "desc" },
@@ -37,6 +37,9 @@ export default async function TeacherAttendancePage() {
       include: {
         _count: { select: { students: { where: { status: "ACTIVE" } } } },
       },
+    }),
+    prisma.school.findFirst({
+      select: { latitude: true, longitude: true, defaultRadius: true },
     }),
   ]);
 
@@ -61,5 +64,11 @@ export default async function TeacherAttendancePage() {
     studentCount: c._count.students,
   }));
 
-  return <AttendanceClient sessions={sessions} classes={classes} />;
+  const school = {
+    latitude: schoolRaw?.latitude ?? null,
+    longitude: schoolRaw?.longitude ?? null,
+    defaultRadius: schoolRaw?.defaultRadius ?? null,
+  };
+
+  return <AttendanceClient sessions={sessions} classes={classes} school={school} />;
 }

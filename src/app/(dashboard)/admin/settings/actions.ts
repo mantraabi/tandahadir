@@ -30,11 +30,18 @@ const schoolSchema = z.object({
   email: z.string().email("Format email tidak valid").optional().or(z.literal("")),
   principal: z.string().optional(),
   npsn: z.string().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  defaultRadius: z.number().int().min(10).max(2000).nullable().optional(),
 });
 
 export async function updateSchoolProfile(formData: FormData): Promise<ActionResult> {
   try {
     await requireAdmin();
+
+    const latStr = formData.get("latitude") as string | null;
+    const lngStr = formData.get("longitude") as string | null;
+    const radiusStr = formData.get("defaultRadius") as string | null;
 
     const raw = {
       name: formData.get("name") as string,
@@ -43,6 +50,9 @@ export async function updateSchoolProfile(formData: FormData): Promise<ActionRes
       email: (formData.get("email") as string) || "",
       principal: (formData.get("principal") as string) || undefined,
       npsn: (formData.get("npsn") as string) || undefined,
+      latitude: latStr && latStr !== "" ? parseFloat(latStr) : null,
+      longitude: lngStr && lngStr !== "" ? parseFloat(lngStr) : null,
+      defaultRadius: radiusStr ? parseInt(radiusStr) : null,
     };
 
     const parsed = schoolSchema.safeParse(raw);
@@ -50,30 +60,23 @@ export async function updateSchoolProfile(formData: FormData): Promise<ActionRes
       return { success: false, error: parsed.error.issues[0].message };
     }
 
+    const data = {
+      name: parsed.data.name,
+      address: parsed.data.address ?? null,
+      phone: parsed.data.phone ?? null,
+      email: parsed.data.email || null,
+      principal: parsed.data.principal ?? null,
+      npsn: parsed.data.npsn ?? null,
+      latitude: parsed.data.latitude ?? null,
+      longitude: parsed.data.longitude ?? null,
+      defaultRadius: parsed.data.defaultRadius ?? null,
+    };
+
     const school = await prisma.school.findFirst();
     if (school) {
-      await prisma.school.update({
-        where: { id: school.id },
-        data: {
-          name: parsed.data.name,
-          address: parsed.data.address ?? null,
-          phone: parsed.data.phone ?? null,
-          email: parsed.data.email || null,
-          principal: parsed.data.principal ?? null,
-          npsn: parsed.data.npsn ?? null,
-        },
-      });
+      await prisma.school.update({ where: { id: school.id }, data });
     } else {
-      await prisma.school.create({
-        data: {
-          name: parsed.data.name,
-          address: parsed.data.address ?? null,
-          phone: parsed.data.phone ?? null,
-          email: parsed.data.email || null,
-          principal: parsed.data.principal ?? null,
-          npsn: parsed.data.npsn ?? null,
-        },
-      });
+      await prisma.school.create({ data });
     }
 
     revalidatePath("/admin/settings");

@@ -100,7 +100,7 @@ export async function searchStudents(
 export async function submitAttendance(
   qrCode: string,
   studentId: string,
-  geo?: { latitude: number; longitude: number } | null
+  geo?: { latitude: number; longitude: number; accuracy?: number } | null
 ): Promise<ActionResult> {
   try {
     const session = await prisma.attendanceSession.findUnique({
@@ -159,16 +159,30 @@ export async function submitAttendance(
           error: "Sesi ini memerlukan verifikasi lokasi. Aktifkan izin GPS pada browser Anda.",
         };
       }
+
+      // Reject if GPS accuracy is too poor to trust
+      const studentAcc = geo.accuracy ?? 0;
+      if (studentAcc > 200) {
+        return {
+          success: false,
+          error: `Akurasi GPS Anda terlalu rendah (±${Math.round(studentAcc)}m). Coba pindah ke luar ruangan, aktifkan GPS, lalu refresh halaman.`,
+        };
+      }
+
       const distance = distanceMeters(
         session.latitude!,
         session.longitude!,
         geo.latitude,
         geo.longitude
       );
-      if (distance > session.radius!) {
+
+      // Use accuracy as benefit-of-the-doubt tolerance
+      // Effective check: distance must be within (radius + GPS uncertainty)
+      const effectiveRadius = session.radius! + studentAcc;
+      if (distance > effectiveRadius) {
         return {
           success: false,
-          error: `Anda berada ${Math.round(distance)}m dari lokasi kelas (maks ${session.radius}m). Mohon datang ke kelas untuk absen.`,
+          error: `Anda berada ${Math.round(distance)}m dari lokasi kelas (maks ${session.radius}m, akurasi GPS Anda ±${Math.round(studentAcc)}m). Mohon datang ke kelas untuk absen.`,
         };
       }
     }

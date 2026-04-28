@@ -38,6 +38,9 @@ export default async function SettingsPage() {
     email: schoolRaw?.email ?? null,
     principal: schoolRaw?.principal ?? null,
     npsn: schoolRaw?.npsn ?? null,
+    latitude: schoolRaw?.latitude ?? null,
+    longitude: schoolRaw?.longitude ?? null,
+    defaultRadius: schoolRaw?.defaultRadius ?? null,
   };
 
   const admin = {

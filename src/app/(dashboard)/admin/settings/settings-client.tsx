@@ -17,6 +17,9 @@ import {
   Eye,
   EyeOff,
   Hash,
+  Crosshair,
+  Check,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { updateSchoolProfile, changePassword, updateAdminProfile } from "./actions";
@@ -29,6 +32,9 @@ export type SchoolData = {
   email: string | null;
   principal: string | null;
   npsn: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  defaultRadius: number | null;
 };
 
 export type AdminData = {
@@ -246,6 +252,12 @@ function SchoolProfileForm({ school }: { school: SchoolData }) {
             className="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-sm outline-none focus:border-[#0d5c63] focus:bg-white focus:ring-2 focus:ring-[#0d5c63]/20 transition-all resize-none"
           />
         </div>
+
+        <SchoolGeofenceSection
+          initialLat={school.latitude}
+          initialLng={school.longitude}
+          initialRadius={school.defaultRadius}
+        />
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
@@ -577,4 +589,238 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 function maskKey(key: string) {
   if (key.length <= 8) return key;
   return key.slice(0, 4) + "••••••••" + key.slice(-4);
+}
+
+/* ─── School Geofence Section ─── */
+
+function SchoolGeofenceSection({
+  initialLat,
+  initialLng,
+  initialRadius,
+}: {
+  initialLat: number | null;
+  initialLng: number | null;
+  initialRadius: number | null;
+}) {
+  const [lat, setLat] = useState<number | null>(initialLat);
+  const [lng, setLng] = useState<number | null>(initialLng);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function detectLocation() {
+    setError("");
+    if (!("geolocation" in navigator)) {
+      setError("Browser tidak mendukung geolocation");
+      return;
+    }
+    setLoading(true);
+
+    let best: GeolocationPosition | null = null;
+    let count = 0;
+    const target = 3;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        count++;
+        if (!best || pos.coords.accuracy < best.coords.accuracy) {
+          best = pos;
+        }
+        if (count >= target) {
+          navigator.geolocation.clearWatch(watchId);
+          if (best) {
+            const b = best as GeolocationPosition;
+            setLat(b.coords.latitude);
+            setLng(b.coords.longitude);
+            setAccuracy(b.coords.accuracy);
+          }
+          setLoading(false);
+        }
+      },
+      (err) => {
+        navigator.geolocation.clearWatch(watchId);
+        setLoading(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setError("Izin lokasi ditolak. Aktifkan di pengaturan browser.");
+        } else if (err.code === err.TIMEOUT) {
+          setError("Timeout mencari lokasi. Coba lagi.");
+        } else {
+          setError("Gagal mendapatkan lokasi");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+
+    setTimeout(() => {
+      if (count > 0 && best) {
+        navigator.geolocation.clearWatch(watchId);
+        const b = best as GeolocationPosition;
+        setLat(b.coords.latitude);
+        setLng(b.coords.longitude);
+        setAccuracy(b.coords.accuracy);
+        setLoading(false);
+      }
+    }, 12000);
+  }
+
+  function handleClear() {
+    setLat(null);
+    setLng(null);
+    setAccuracy(null);
+  }
+
+  const hasCoords = lat != null && lng != null;
+  const accClass =
+    accuracy == null
+      ? "text-teal-700 bg-teal-50 border-teal-100"
+      : accuracy <= 30
+      ? "text-teal-700 bg-teal-50 border-teal-100"
+      : accuracy <= 100
+      ? "text-amber-700 bg-amber-50 border-amber-100"
+      : "text-red-700 bg-red-50 border-red-100";
+
+  return (
+    <div className="border border-gray-100 rounded-xl p-4 bg-gray-50/50 space-y-3">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-[#0d5c63]/10 flex items-center justify-center shrink-0">
+          <MapPin size={16} className="text-[#0d5c63]" />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-sm font-bold text-gray-900">Lokasi Sekolah (Geofence)</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Titik koordinat ini akan dipakai sebagai pusat radius absensi. Guru bisa langsung gunakan tanpa harus deteksi GPS tiap kali.
+          </p>
+        </div>
+      </div>
+
+      {/* Hidden inputs for form submission */}
+      <input type="hidden" name="latitude" value={lat ?? ""} />
+      <input type="hidden" name="longitude" value={lng ?? ""} />
+
+      {!hasCoords ? (
+        <button
+          type="button"
+          onClick={detectLocation}
+          disabled={loading}
+          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[#0d5c63]/10 text-[#0d5c63] text-sm font-semibold hover:bg-[#0d5c63]/20 transition-colors disabled:opacity-60"
+        >
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
+          {loading ? "Mendeteksi lokasi..." : "Gunakan Lokasi Saya Sekarang"}
+        </button>
+      ) : (
+        <div className={`border rounded-lg p-3 ${accClass}`}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-start gap-2 min-w-0">
+              <Check size={14} className="mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold flex items-center gap-1.5 flex-wrap">
+                  Lokasi tersimpan
+                  {accuracy != null && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/60">
+                      ±{Math.round(accuracy)}m
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] font-mono opacity-80 mt-0.5">
+                  {lat!.toFixed(6)}, {lng!.toFixed(6)}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={detectLocation}
+                className="text-[10px] font-medium hover:underline"
+              >
+                Ulangi
+              </button>
+              <span className="text-[10px] opacity-50">·</span>
+              <button
+                type="button"
+                onClick={handleClear}
+                className="text-[10px] font-medium hover:underline"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+          {accuracy != null && accuracy > 100 && (
+            <p className="text-[10px] mt-2 leading-relaxed">
+              ⚠️ Akurasi rendah. Coba pindah dekat jendela / luar ruangan, atau pakai HP.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Manual input as fallback */}
+      <details className="text-xs">
+        <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
+          Input manual (opsional)
+        </summary>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-1">Latitude</label>
+            <input
+              type="number"
+              step="any"
+              value={lat ?? ""}
+              onChange={(e) => setLat(e.target.value === "" ? null : parseFloat(e.target.value))}
+              placeholder="-6.200000"
+              className="w-full px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-mono outline-none focus:border-[#0d5c63] focus:ring-2 focus:ring-[#0d5c63]/20"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-1">Longitude</label>
+            <input
+              type="number"
+              step="any"
+              value={lng ?? ""}
+              onChange={(e) => setLng(e.target.value === "" ? null : parseFloat(e.target.value))}
+              placeholder="106.816666"
+              className="w-full px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-mono outline-none focus:border-[#0d5c63] focus:ring-2 focus:ring-[#0d5c63]/20"
+            />
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-400 mt-1.5">
+          Tip: dapat koordinat dari{" "}
+          <a
+            href="https://www.google.com/maps"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            Google Maps
+          </a>{" "}
+          → klik kanan pada lokasi sekolah → klik koordinat untuk menyalin.
+        </p>
+      </details>
+
+      {/* Default radius */}
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">
+          Radius Default (meter)
+        </label>
+        <select
+          name="defaultRadius"
+          defaultValue={initialRadius?.toString() ?? "50"}
+          className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm outline-none focus:border-[#0d5c63] focus:ring-2 focus:ring-[#0d5c63]/20"
+        >
+          <option value="20">20m (sangat ketat — dalam kelas)</option>
+          <option value="50">50m (rekomendasi — area kelas)</option>
+          <option value="100">100m (gedung sekolah)</option>
+          <option value="200">200m (longgar)</option>
+          <option value="500">500m (sangat longgar)</option>
+        </select>
+        <p className="text-[11px] text-gray-400 mt-1">
+          Default ini dipakai saat guru memilih &quot;Pakai Lokasi Sekolah&quot; tanpa override radius.
+        </p>
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-600 flex items-center gap-1.5">
+          <AlertTriangle size={12} />
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }

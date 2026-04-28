@@ -36,16 +36,19 @@ enum LicenseStatus {
 // ==================== SCHOOL ====================
 
 model School {
-  id        String   @id @default(cuid())
-  name      String
-  address   String?
-  phone     String?
-  email     String?
-  logoUrl   String?
-  principal String?
-  npsn      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  name          String
+  address       String?
+  phone         String?
+  email         String?
+  logoUrl       String?
+  principal     String?
+  npsn          String?
+  latitude      Float?
+  longitude     Float?
+  defaultRadius Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@map("schools")
 }

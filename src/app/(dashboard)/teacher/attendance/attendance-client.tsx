@@ -25,6 +25,7 @@ import {
   Check,
   MapPin,
   Crosshair,
+  School,
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
@@ -82,9 +83,16 @@ type SessionDetail = {
   }[];
 };
 
+type SchoolGeo = {
+  latitude: number | null;
+  longitude: number | null;
+  defaultRadius: number | null;
+};
+
 type Props = {
   sessions: SessionItem[];
   classes: ClassOption[];
+  school: SchoolGeo;
 };
 
 /* ─── Constants ─── */
@@ -114,7 +122,7 @@ function formatDate(iso: string) {
 
 /* ─── Main Component ─── */
 
-export function AttendanceClient({ sessions, classes }: Props) {
+export function AttendanceClient({ sessions, classes, school }: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [showCreate, setShowCreate] = useState(false);
@@ -320,7 +328,7 @@ export function AttendanceClient({ sessions, classes }: Props) {
 
       {/* Modals */}
       {showCreate && (
-        <CreateSessionModal classes={classes} onClose={() => setShowCreate(false)} />
+        <CreateSessionModal classes={classes} school={school} onClose={() => setShowCreate(false)} />
       )}
       {detailSession && (
         <SessionDetailModal
@@ -337,7 +345,7 @@ export function AttendanceClient({ sessions, classes }: Props) {
 
 /* ─── Create Session Modal ─── */
 
-function CreateSessionModal({ classes, onClose }: { classes: ClassOption[]; onClose: () => void }) {
+function CreateSessionModal({ classes, school, onClose }: { classes: ClassOption[]; school: SchoolGeo; onClose: () => void }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
 
@@ -412,7 +420,7 @@ function CreateSessionModal({ classes, onClose }: { classes: ClassOption[]; onCl
             <p className="text-xs text-gray-400 mt-1">Durasi pendek mengurangi peluang nitip absen</p>
           </div>
 
-          <GeofenceField />
+          <GeofenceField school={school} />
 
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
@@ -709,9 +717,18 @@ function SessionDetailModal({ session, onClose }: { session: SessionDetail; onCl
 
 /* ─── Geofence Field (in Create Session form) ─── */
 
-function GeofenceField() {
+function GeofenceField({ school }: { school: SchoolGeo }) {
+  const hasSchoolLocation = school.latitude != null && school.longitude != null;
+
   const [enabled, setEnabled] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number } | null>(
+    hasSchoolLocation
+      ? { lat: school.latitude!, lng: school.longitude!, accuracy: 0 }
+      : null
+  );
+  const [source, setSource] = useState<"school" | "device">(
+    hasSchoolLocation ? "school" : "device"
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -722,12 +739,32 @@ function GeofenceField() {
       return;
     }
     setLoading(true);
-    navigator.geolocation.getCurrentPosition(
+
+    // Take multiple readings, pick best (lowest accuracy value)
+    let best: GeolocationPosition | null = null;
+    let count = 0;
+    const target = 3; // 3 readings
+    const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLoading(false);
+        count++;
+        if (!best || pos.coords.accuracy < best.coords.accuracy) {
+          best = pos;
+        }
+        if (count >= target) {
+          navigator.geolocation.clearWatch(watchId);
+          if (best) {
+            const b = best as GeolocationPosition;
+            setCoords({
+              lat: b.coords.latitude,
+              lng: b.coords.longitude,
+              accuracy: b.coords.accuracy,
+            });
+          }
+          setLoading(false);
+        }
       },
       (err) => {
+        navigator.geolocation.clearWatch(watchId);
         setLoading(false);
         if (err.code === err.PERMISSION_DENIED) {
           setError("Izin lokasi ditolak. Aktifkan di pengaturan browser.");
@@ -737,9 +774,40 @@ function GeofenceField() {
           setError("Gagal mendapatkan lokasi");
         }
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+
+    // Safety timeout — finalize after 12s even if didn't reach 3 readings
+    setTimeout(() => {
+      if (count > 0 && best) {
+        navigator.geolocation.clearWatch(watchId);
+        const b = best as GeolocationPosition;
+        setCoords({
+          lat: b.coords.latitude,
+          lng: b.coords.longitude,
+          accuracy: b.coords.accuracy,
+        });
+        setLoading(false);
+      }
+    }, 12000);
   }
+
+  const accuracyClass =
+    !coords
+      ? ""
+      : coords.accuracy <= 30
+      ? "text-teal-700 bg-teal-50 border-teal-100"
+      : coords.accuracy <= 100
+      ? "text-amber-700 bg-amber-50 border-amber-100"
+      : "text-red-700 bg-red-50 border-red-100";
+
+  const accuracyLabel = !coords
+    ? ""
+    : coords.accuracy <= 30
+    ? "Akurat"
+    : coords.accuracy <= 100
+    ? "Cukup"
+    : "Buruk";
 
   return (
     <div className="space-y-2">
@@ -770,38 +838,114 @@ function GeofenceField() {
 
       {enabled && (
         <div className="ml-7 space-y-3 pt-1">
-          {/* Detect location button */}
-          {!coords ? (
-            <button
-              type="button"
-              onClick={detectLocation}
-              disabled={loading}
-              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[#0d5c63]/10 text-[#0d5c63] text-sm font-semibold hover:bg-[#0d5c63]/20 transition-colors disabled:opacity-60"
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
-              {loading ? "Mendeteksi lokasi..." : "Gunakan Lokasi Sekarang"}
-            </button>
-          ) : (
-            <div className="bg-teal-50 border border-teal-100 rounded-lg p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-start gap-2 min-w-0">
-                  <Check size={14} className="text-teal-600 mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-teal-800">Lokasi terdeteksi</p>
-                    <p className="text-[10px] text-teal-600 font-mono truncate">
-                      {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
-                    </p>
-                  </div>
+          {/* Source switcher */}
+          {hasSchoolLocation && (
+            <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  setSource("school");
+                  setCoords({
+                    lat: school.latitude!,
+                    lng: school.longitude!,
+                    accuracy: 0,
+                  });
+                  setError("");
+                }}
+                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  source === "school"
+                    ? "bg-white text-[#0d5c63] shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <School size={11} className="inline mr-1" />
+                Lokasi Sekolah
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSource("device");
+                  setCoords(null);
+                  setError("");
+                }}
+                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  source === "device"
+                    ? "bg-white text-[#0d5c63] shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <Crosshair size={11} className="inline mr-1" />
+                Lokasi HP Saya
+              </button>
+            </div>
+          )}
+
+          {/* School location info */}
+          {source === "school" && coords && (
+            <div className="border border-teal-100 bg-teal-50 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <Check size={14} className="text-teal-600 mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-teal-800">
+                    Pakai koordinat sekolah
+                  </p>
+                  <p className="text-[10px] text-teal-700 font-mono truncate mt-0.5">
+                    {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+                  </p>
+                  <p className="text-[10px] text-teal-700/70 mt-1">
+                    Tidak perlu deteksi GPS — pakai koordinat yang sudah diatur admin di Pengaturan.
+                  </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Device location flow */}
+          {source === "device" && (
+            <>
+              {!coords ? (
                 <button
                   type="button"
                   onClick={detectLocation}
-                  className="text-[10px] font-medium text-teal-700 hover:underline shrink-0"
+                  disabled={loading}
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[#0d5c63]/10 text-[#0d5c63] text-sm font-semibold hover:bg-[#0d5c63]/20 transition-colors disabled:opacity-60"
                 >
-                  Ulangi
+                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
+                  {loading ? "Mendeteksi lokasi..." : "Gunakan Lokasi Sekarang"}
                 </button>
-              </div>
-            </div>
+              ) : (
+                <div className={`border rounded-lg p-3 ${accuracyClass}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Check size={14} className="mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                          Lokasi terdeteksi
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/60">
+                            ±{Math.round(coords.accuracy)}m · {accuracyLabel}
+                          </span>
+                        </p>
+                        <p className="text-[10px] font-mono truncate opacity-80 mt-0.5">
+                          {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={detectLocation}
+                      className="text-[10px] font-medium hover:underline shrink-0"
+                    >
+                      Ulangi
+                    </button>
+                  </div>
+                  {coords.accuracy > 100 && (
+                    <p className="text-[10px] mt-2 leading-relaxed">
+                      ⚠️ Akurasi buruk. Coba pindah ke luar (dekat jendela), aktifkan GPS, atau gunakan HP. Atau pilih radius lebih besar.
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           {/* Hidden inputs for form submission */}
@@ -815,7 +959,7 @@ function GeofenceField() {
             </label>
             <select
               name="radius"
-              defaultValue="50"
+              defaultValue={(school.defaultRadius ?? 50).toString()}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm outline-none focus:border-[#0d5c63] focus:bg-white focus:ring-2 focus:ring-[#0d5c63]/20 transition-all"
             >
               <option value="20">20m (sangat ketat — dalam kelas)</option>
@@ -833,10 +977,12 @@ function GeofenceField() {
             </p>
           )}
 
-          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2.5">
-            <strong>Tip:</strong> Aktifkan saat Anda berada di dalam kelas, lalu klik &quot;Gunakan Lokasi Sekarang&quot;.
-            Lokasi akan menjadi titik pusat radius.
-          </p>
+          {!hasSchoolLocation && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+              <strong>Tip:</strong> Minta admin mengatur lokasi sekolah di{" "}
+              <em>Pengaturan</em> agar Anda tidak perlu deteksi GPS tiap kali buat sesi.
+            </p>
+          )}
         </div>
       )}
     </div>

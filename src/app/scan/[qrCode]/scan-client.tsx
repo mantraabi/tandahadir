@@ -66,7 +66,7 @@ export function ScanClient({ qrCode, session }: Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<SuccessData | null>(null);
-  const [geo, setGeo] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [geo, setGeo] = useState<{ latitude: number; longitude: number; accuracy: number } | null>(null);
   const [geoStatus, setGeoStatus] = useState<"idle" | "loading" | "ready" | "denied">("idle");
   const [isPending, startTransition] = useTransition();
 
@@ -77,7 +77,7 @@ export function ScanClient({ qrCode, session }: Props) {
   // Debounce ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ─── Geolocation ───
+  // ─── Geolocation (watch + take best of multiple readings) ───
   useEffect(() => {
     if (!session.requiresGeo) return;
     setGeoStatus("loading");
@@ -85,14 +85,31 @@ export function ScanClient({ qrCode, session }: Props) {
       setGeoStatus("denied");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
+
+    let best: GeolocationPosition | null = null;
+    const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        setGeo({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        if (!best || pos.coords.accuracy < best.coords.accuracy) {
+          best = pos;
+        }
+        setGeo({
+          latitude: best.coords.latitude,
+          longitude: best.coords.longitude,
+          accuracy: best.coords.accuracy,
+        });
         setGeoStatus("ready");
       },
       () => setGeoStatus("denied"),
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+
+    // Stop watching after 30s to save battery
+    const stopId = setTimeout(() => navigator.geolocation.clearWatch(watchId), 30000);
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      clearTimeout(stopId);
+    };
   }, [session.requiresGeo]);
 
   // ─── Countdown ───
@@ -260,8 +277,17 @@ export function ScanClient({ qrCode, session }: Props) {
               }
             />
             <div className="flex-1">
-              <p className="text-sm font-semibold text-gray-900">
-                {geoStatus === "ready" && "Lokasi terdeteksi"}
+              <p className="text-sm font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
+                {geoStatus === "ready" && (
+                  <>
+                    Lokasi terdeteksi
+                    {geo && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/70 text-gray-600">
+                        ±{Math.round(geo.accuracy)}m
+                      </span>
+                    )}
+                  </>
+                )}
                 {geoStatus === "loading" && "Mendeteksi lokasi..."}
                 {geoStatus === "denied" && "Akses lokasi ditolak"}
                 {geoStatus === "idle" && "Memverifikasi lokasi"}
@@ -269,6 +295,10 @@ export function ScanClient({ qrCode, session }: Props) {
               <p className="text-xs text-gray-500 mt-0.5">
                 {geoStatus === "denied"
                   ? "Aktifkan izin lokasi pada browser Anda untuk melanjutkan"
+                  : geoStatus === "loading"
+                  ? "Tunggu sebentar, GPS sedang dikalibrasi..."
+                  : geo && geo.accuracy > 100
+                  ? "Akurasi rendah. Coba pindah ke luar ruangan / dekat jendela, lalu tunggu beberapa detik"
                   : "Sesi ini memerlukan verifikasi lokasi GPS"}
               </p>
             </div>
