@@ -3,7 +3,7 @@
 // src/app/scan/[qrCode]/actions.ts
 
 import { prisma } from "@/lib/db/prisma";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 type ActionResult = {
@@ -187,6 +187,16 @@ export async function submitAttendance(
         longitude: geo?.longitude,
         deviceInfo: userAgent,
       },
+    });
+
+    // Set HTTP-only cookie to prevent refresh-bypass on the same device
+    const cookieStore = await cookies();
+    cookieStore.set(`th_att_${session.id}`, studentId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      expires: session.qrExpiresAt,
+      path: `/scan/${qrCode}`,
     });
 
     revalidatePath(`/scan/${qrCode}`);
