@@ -8,7 +8,7 @@ import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard, QrCode, FileSignature, Users,
   BookOpen, GraduationCap, BarChart3, Settings,
-  LogOut, ChevronLeft,
+  LogOut, ChevronLeft, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -26,6 +26,7 @@ const NAV_BY_ROLE: Record<string, NavItem[]> = {
     { label: "Kelas",       href: "/admin/classes",    icon: BookOpen        },
     { label: "Siswa",       href: "/admin/students",   icon: GraduationCap   },
     { label: "Laporan",     href: "/admin/reports",    icon: BarChart3       },
+    { label: "Audit Log",   href: "/admin/audit",      icon: Shield          },
     { label: "Dokumen",     href: "/admin/documents",  icon: FileSignature   },
     { label: "Pengaturan",  href: "/admin/settings",   icon: Settings        },
   ],
