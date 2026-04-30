@@ -2,7 +2,7 @@
 
 // src/app/(dashboard)/admin/reports/reports-client.tsx
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   BarChart3,
   TrendingUp,
@@ -13,6 +13,9 @@ import {
   Loader2,
   ClipboardList,
   PieChart as PieChartIcon,
+  FileSpreadsheet,
+  FileText,
+  ChevronDown,
 } from "lucide-react";
 import {
   BarChart,
@@ -30,7 +33,14 @@ import {
   Area,
 } from "recharts";
 import * as XLSX from "xlsx";
-import { getReportData, type ReportData, type ReportFilters } from "./actions";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import {
+  getReportData,
+  getDetailedAttendance,
+  type ReportData,
+  type ReportFilters,
+} from "./actions";
 
 type ClassOption = { id: string; name: string };
 
@@ -47,6 +57,43 @@ export function ReportsClient({ initialData, classes }: Props) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isExporting, setIsExporting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  function currentFilters(): ReportFilters {
+    const f: ReportFilters = {};
+    if (classId) f.classId = classId;
+    if (startDate) f.startDate = startDate;
+    if (endDate) f.endDate = endDate;
+    return f;
+  }
+
+  function filterLabel() {
+    const parts: string[] = [];
+    if (classId) {
+      const c = classes.find((x) => x.id === classId);
+      if (c) parts.push(`Kelas: ${c.name}`);
+    }
+    if (startDate || endDate) {
+      parts.push(`Periode: ${startDate || "..."} s/d ${endDate || "..."}`);
+    }
+    return parts.length ? parts.join(" | ") : "Semua data";
+  }
+
+  function todayStamp() {
+    return new Date().toISOString().split("T")[0];
+  }
 
   function applyFilter() {
     const filters: ReportFilters = {};
@@ -115,7 +162,146 @@ export function ReportsClient({ initialData, classes }: Props) {
       XLSX.utils.book_append_sheet(wb, wsTrend, "Tren Harian");
     }
 
-    XLSX.writeFile(wb, `laporan_kehadiran_${new Date().toISOString().split("T")[0]}.xlsx`);
+    XLSX.writeFile(wb, `laporan_ringkasan_${todayStamp()}.xlsx`);
+  }
+
+  async function exportDetailExcel() {
+    setIsExporting(true);
+    setMenuOpen(false);
+    try {
+      const rows = await getDetailedAttendance(currentFilters());
+      if (rows.length === 0) {
+        alert("Tidak ada data kehadiran untuk diekspor pada filter ini.");
+        return;
+      }
+      const headers = ["Tanggal", "Kelas", "Mata Pelajaran", "NIS", "Nama Siswa", "Status", "Metode", "Jam Hadir"];
+      const body = rows.map((r) => [
+        r.date, r.className, r.subject, r.nis, r.studentName,
+        statusLabel(r.status), methodLabel(r.method), r.checkInAt ?? "-",
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...body]);
+      ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 26 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Detail Kehadiran");
+      XLSX.writeFile(wb, `laporan_detail_${todayStamp()}.xlsx`);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mengambil data detail. Coba lagi.");
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  function exportSummaryPDF() {
+    setMenuOpen(false);
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const margin = 40;
+    let y = margin;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Laporan Kehadiran Siswa", margin, y);
+    y += 22;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(110);
+    doc.text(`Filter: ${filterLabel()}`, margin, y); y += 14;
+    doc.text(`Tanggal cetak: ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}`, margin, y);
+    y += 18;
+    doc.setTextColor(0);
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Metrik", "Nilai"]],
+      body: [
+        ["Total Kelas", String(data.summary.totalClasses)],
+        ["Total Siswa Aktif", String(data.summary.totalStudents)],
+        ["Total Sesi", String(data.summary.totalSessions)],
+        ["Total Kehadiran", String(data.summary.totalAttendances)],
+        ["Rata-rata Kehadiran", `${data.summary.overallRate}%`],
+      ],
+      theme: "grid",
+      headStyles: { fillColor: [13, 92, 99] },
+      styles: { fontSize: 10 },
+      margin: { left: margin, right: margin },
+    });
+
+    autoTable(doc, {
+      head: [["Status", "Jumlah", "Persentase"]],
+      body: [
+        ["Hadir", data.statusSummary.present, pct(data.statusSummary.present, data.statusSummary.total)],
+        ["Absen", data.statusSummary.absent, pct(data.statusSummary.absent, data.statusSummary.total)],
+        ["Terlambat", data.statusSummary.late, pct(data.statusSummary.late, data.statusSummary.total)],
+        ["Sakit", data.statusSummary.sick, pct(data.statusSummary.sick, data.statusSummary.total)],
+        ["Izin", data.statusSummary.permit, pct(data.statusSummary.permit, data.statusSummary.total)],
+      ],
+      theme: "grid",
+      headStyles: { fillColor: [13, 92, 99] },
+      styles: { fontSize: 10 },
+      margin: { left: margin, right: margin },
+    });
+
+    autoTable(doc, {
+      head: [["Kelas", "Siswa", "Sesi", "Hadir", "Absen", "Telat", "Sakit", "Izin", "Tingkat"]],
+      body: data.classAttendance.map((c) => [
+        c.className, c.totalStudents, c.totalSessions,
+        c.present, c.absent, c.late, c.sick, c.permit, `${c.rate}%`,
+      ]),
+      theme: "striped",
+      headStyles: { fillColor: [13, 92, 99] },
+      styles: { fontSize: 9 },
+      margin: { left: margin, right: margin },
+    });
+
+    doc.save(`laporan_ringkasan_${todayStamp()}.pdf`);
+  }
+
+  async function exportDetailPDF() {
+    setIsExporting(true);
+    setMenuOpen(false);
+    try {
+      const rows = await getDetailedAttendance(currentFilters());
+      if (rows.length === 0) {
+        alert("Tidak ada data kehadiran untuk diekspor pada filter ini.");
+        return;
+      }
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const margin = 32;
+      let y = margin;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.text("Detail Kehadiran Siswa", margin, y); y += 20;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(110);
+      doc.text(`Filter: ${filterLabel()}`, margin, y); y += 12;
+      doc.text(`Total baris: ${rows.length} | Tanggal cetak: ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}`, margin, y);
+      y += 14;
+      doc.setTextColor(0);
+
+      autoTable(doc, {
+        startY: y,
+        head: [["Tanggal", "Kelas", "Mapel", "NIS", "Nama", "Status", "Metode", "Jam"]],
+        body: rows.map((r) => [
+          r.date, r.className, r.subject, r.nis, r.studentName,
+          statusLabel(r.status), methodLabel(r.method), r.checkInAt ?? "-",
+        ]),
+        theme: "striped",
+        headStyles: { fillColor: [13, 92, 99] },
+        styles: { fontSize: 8, cellPadding: 3 },
+        margin: { left: margin, right: margin },
+      });
+
+      doc.save(`laporan_detail_${todayStamp()}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mengambil data detail. Coba lagi.");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   const pieData = [
@@ -136,13 +322,49 @@ export function ReportsClient({ initialData, classes }: Props) {
             Ringkasan dan analisis data kehadiran siswa
           </p>
         </div>
-        <button
-          onClick={exportToExcel}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0d5c63] text-white rounded-xl text-sm font-semibold hover:bg-[#0a4a50] transition-colors"
-        >
-          <Download size={16} />
-          Export Excel
-        </button>
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            disabled={isExporting}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0d5c63] text-white rounded-xl text-sm font-semibold hover:bg-[#0a4a50] transition-colors disabled:opacity-60"
+          >
+            {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            Export
+            <ChevronDown size={14} className={`transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-lg z-20 overflow-hidden">
+              <button onClick={exportToExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-gray-50">
+                <FileSpreadsheet size={16} className="text-emerald-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Excel Ringkasan</div>
+                  <div className="text-xs text-gray-400">Per kelas + tren harian</div>
+                </div>
+              </button>
+              <button onClick={exportDetailExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-gray-50 border-t border-gray-50">
+                <FileSpreadsheet size={16} className="text-emerald-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Excel Detail Siswa</div>
+                  <div className="text-xs text-gray-400">Setiap baris per siswa</div>
+                </div>
+              </button>
+              <button onClick={exportSummaryPDF} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-gray-50 border-t border-gray-50">
+                <FileText size={16} className="text-red-500" />
+                <div>
+                  <div className="font-medium text-gray-900">PDF Ringkasan</div>
+                  <div className="text-xs text-gray-400">Cocok untuk dicetak</div>
+                </div>
+              </button>
+              <button onClick={exportDetailPDF} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-gray-50 border-t border-gray-50">
+                <FileText size={16} className="text-red-500" />
+                <div>
+                  <div className="font-medium text-gray-900">PDF Detail Siswa</div>
+                  <div className="text-xs text-gray-400">Lengkap per baris siswa</div>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -423,6 +645,32 @@ export function ReportsClient({ initialData, classes }: Props) {
       </div>
     </div>
   );
+}
+
+/* ─── Helpers ─── */
+
+function pct(part: number, total: number): string {
+  if (total <= 0) return "0%";
+  return `${Math.round((part / total) * 100)}%`;
+}
+
+function statusLabel(s: string): string {
+  switch (s) {
+    case "PRESENT": return "Hadir";
+    case "ABSENT": return "Absen";
+    case "LATE": return "Terlambat";
+    case "SICK": return "Sakit";
+    case "PERMIT": return "Izin";
+    default: return s;
+  }
+}
+
+function methodLabel(m: string): string {
+  switch (m) {
+    case "QR": return "QR";
+    case "MANUAL": return "Manual";
+    default: return m;
+  }
 }
 
 /* ─── Helper Components ─── */

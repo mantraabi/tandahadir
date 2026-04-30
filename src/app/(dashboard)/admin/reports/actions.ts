@@ -273,3 +273,65 @@ async function computeReportData(filters: ReportFilters): Promise<ReportData> {
     dailyTrend,
   };
 }
+
+// ─── Detailed per-attendance rows for granular export ───
+
+export type DetailedAttendanceRow = {
+  date: string;          // YYYY-MM-DD (Jakarta)
+  className: string;
+  subject: string;
+  nis: string;
+  studentName: string;
+  status: string;        // PRESENT / ABSENT / LATE / SICK / PERMIT
+  method: string;        // QR / MANUAL
+  checkInAt: string | null; // ISO time HH:mm
+};
+
+export async function getDetailedAttendance(
+  filters: ReportFilters
+): Promise<DetailedAttendanceRow[]> {
+  await requireAdmin();
+
+  const startDate = filters.startDate ? new Date(filters.startDate) : null;
+  let endDate: Date | null = null;
+  if (filters.endDate) {
+    endDate = new Date(filters.endDate);
+    endDate.setHours(23, 59, 59, 999);
+  }
+  const classId = filters.classId ?? null;
+
+  const sessionWhere: Prisma.AttendanceSessionWhereInput = {};
+  if (classId) sessionWhere.classId = classId;
+  if (startDate || endDate) {
+    sessionWhere.date = {};
+    if (startDate) sessionWhere.date.gte = startDate;
+    if (endDate) sessionWhere.date.lte = endDate;
+  }
+
+  // Cap to a sane upper bound to avoid OOM in browser export
+  const rows = await prisma.attendance.findMany({
+    where: { session: sessionWhere },
+    take: 10000,
+    orderBy: [{ session: { date: "asc" } }, { checkInAt: "asc" }],
+    select: {
+      status: true,
+      method: true,
+      checkInAt: true,
+      session: { select: { date: true, subject: true, class: { select: { name: true } } } },
+      student: { select: { nis: true, name: true } },
+    },
+  });
+
+  return rows.map((r) => ({
+    date: r.session.date.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" }),
+    className: r.session.class.name,
+    subject: r.session.subject ?? "",
+    nis: r.student.nis ?? "",
+    studentName: r.student.name,
+    status: r.status,
+    method: r.method,
+    checkInAt: r.checkInAt
+      ? r.checkInAt.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })
+      : null,
+  }));
+}

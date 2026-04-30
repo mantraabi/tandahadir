@@ -26,9 +26,16 @@ import {
   MapPin,
   Crosshair,
   School,
+  Download,
+  ChevronDown,
+  FileSpreadsheet,
+  FileText,
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   createAttendanceSession,
   closeSession,
@@ -118,6 +125,17 @@ function formatTime(iso: string) {
 
 function formatDate(iso: string) {
   return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
+}
+
+function statusLabelTeacher(s: string): string {
+  switch (s) {
+    case "PRESENT": return "Hadir";
+    case "ABSENT": return "Absen";
+    case "LATE": return "Terlambat";
+    case "SICK": return "Sakit";
+    case "PERMIT": return "Izin";
+    default: return s;
+  }
 }
 
 /* ─── Main Component ─── */
@@ -451,6 +469,83 @@ function SessionDetailModal({ session, onClose }: { session: SessionDetail; onCl
   const [isPending, startTransition] = useTransition();
   const [tab, setTab] = useState<"qr" | "attendance">("attendance");
   const [studentSearch, setStudentSearch] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+
+  function buildExportRows() {
+    const map = new Map(session.attendances.map((a) => [a.studentId, a]));
+    return session.students.map((s) => {
+      const att = map.get(s.id);
+      return {
+        nis: s.nis ?? s.nisn ?? "",
+        name: s.name,
+        status: att ? att.status : "-",
+        method: att ? att.method : "-",
+        time: att?.checkInAt
+          ? new Date(att.checkInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+          : "-",
+      };
+    });
+  }
+
+  function fileBase() {
+    const cls = session.className.replace(/\s+/g, "_");
+    const date = session.date.split("T")[0];
+    return `absensi_${cls}_${date}`;
+  }
+
+  function exportSessionExcel() {
+    setExportOpen(false);
+    const rows = buildExportRows();
+    const headers = ["NIS", "Nama Siswa", "Status", "Metode", "Jam Hadir"];
+    const body = rows.map((r) => [r.nis, r.name, statusLabelTeacher(r.status), r.method === "QR" ? "QR" : r.method === "MANUAL" ? "Manual" : r.method, r.time]);
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`Daftar Hadir - ${session.className}`],
+      [`Tanggal: ${formatDate(session.date)}${session.subject ? ` | Mapel: ${session.subject}` : ""}`],
+      [],
+      headers,
+      ...body,
+    ]);
+    ws["!cols"] = [{ wch: 14 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Kehadiran");
+    XLSX.writeFile(wb, `${fileBase()}.xlsx`);
+  }
+
+  function exportSessionPDF() {
+    setExportOpen(false);
+    const rows = buildExportRows();
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const margin = 40;
+    let y = margin;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text("Daftar Hadir Siswa", margin, y); y += 20;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(110);
+    doc.text(`Kelas: ${session.className}`, margin, y); y += 13;
+    doc.text(`Tanggal: ${formatDate(session.date)}${session.subject ? `  |  Mapel: ${session.subject}` : ""}`, margin, y); y += 13;
+    doc.text(`Total tercatat: ${session.attendances.length} dari ${session.students.length} siswa`, margin, y); y += 18;
+    doc.setTextColor(0);
+
+    autoTable(doc, {
+      startY: y,
+      head: [["No", "NIS", "Nama Siswa", "Status", "Metode", "Jam"]],
+      body: rows.map((r, i) => [
+        i + 1, r.nis, r.name, statusLabelTeacher(r.status),
+        r.method === "QR" ? "QR" : r.method === "MANUAL" ? "Manual" : r.method,
+        r.time,
+      ]),
+      theme: "striped",
+      headStyles: { fillColor: [13, 92, 99] },
+      styles: { fontSize: 9, cellPadding: 4 },
+      margin: { left: margin, right: margin },
+    });
+
+    doc.save(`${fileBase()}.pdf`);
+  }
 
   const cfg = STATUS_CONFIG[session.status] ?? STATUS_CONFIG.ACTIVE;
   const isActive = session.status === "ACTIVE";
@@ -544,9 +639,37 @@ function SessionDetailModal({ session, onClose }: { session: SessionDetail; onCl
               {formatDate(session.date)} · {formatTime(session.createdAt)}
             </p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <button
+                onClick={() => setExportOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                title="Export"
+              >
+                <Download size={13} />
+                Export
+                <ChevronDown size={12} className={`transition-transform ${exportOpen ? "rotate-180" : ""}`} />
+              </button>
+              {exportOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
+                  <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-100 rounded-lg shadow-lg z-20 overflow-hidden">
+                    <button onClick={exportSessionExcel} className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50">
+                      <FileSpreadsheet size={14} className="text-emerald-600" />
+                      <span className="text-gray-900 font-medium">Excel (.xlsx)</span>
+                    </button>
+                    <button onClick={exportSessionPDF} className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 border-t border-gray-50">
+                      <FileText size={14} className="text-red-500" />
+                      <span className="text-gray-900 font-medium">PDF (.pdf)</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Stats bar */}
