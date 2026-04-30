@@ -73,6 +73,7 @@ model User {
   createdDocs Document[]          @relation("CreatedBy")
   signatures  Signature[]
 
+  @@index([role, isActive])
   @@map("users")
 }
 
@@ -96,6 +97,7 @@ model Class {
   students Student[]
   sessions AttendanceSession[]
 
+  @@index([teacherId, isActive])
   @@map("classes")
 }
 
@@ -120,6 +122,8 @@ model Student {
 
   attendances Attendance[]
 
+  @@index([classId, status])
+  @@index([status])
   @@map("students")
 }
 
@@ -154,6 +158,10 @@ model AttendanceSession {
 
   attendances Attendance[]
 
+  @@index([classId, date])
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([date])
+  @@index([status, qrExpiresAt])
   @@map("attendance_sessions")
 }
 
@@ -178,6 +186,8 @@ model Attendance {
   deviceInfo String?
 
   @@unique([sessionId, studentId])
+  @@index([studentId, checkInAt(sort: Desc)])
+  @@index([checkInAt])
   @@map("attendances")
 }
 
