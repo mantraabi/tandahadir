@@ -183,11 +183,15 @@ model Attendance {
   checkInAt  DateTime          @default(now())
   latitude   Float?
   longitude  Float?
+  accuracy   Float?
   deviceInfo String?
+  ipAddress  String?
+  deviceHash String?
 
   @@unique([sessionId, studentId])
   @@index([studentId, checkInAt(sort: Desc)])
   @@index([checkInAt])
+  @@index([sessionId, deviceHash])
   @@map("attendances")
 }
 

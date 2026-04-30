@@ -4,7 +4,9 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { headers, cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { deviceFingerprint } from "@/lib/device-fingerprint";
 
 type ActionResult = {
   success: boolean;
@@ -42,6 +44,14 @@ export async function searchStudents(
   try {
     if (!query || query.trim().length < 2) {
       return { success: true, data: [] };
+    }
+
+    // Rate limit: 60 search calls per IP per minute
+    const hdrs = await headers();
+    const ip = getClientIp(hdrs);
+    const rl = rateLimit(`search:${ip}`, 60, 60_000);
+    if (!rl.allowed) {
+      return { success: false, error: "Terlalu banyak permintaan. Coba lagi sebentar." };
     }
 
     const session = await prisma.attendanceSession.findUnique({
@@ -103,6 +113,20 @@ export async function submitAttendance(
   geo?: { latitude: number; longitude: number; accuracy?: number } | null
 ): Promise<ActionResult> {
   try {
+    // ── Rate limit by IP (anti-spam) ──
+    const hdrs = await headers();
+    const ip = getClientIp(hdrs);
+    const userAgent = hdrs.get("user-agent") ?? null;
+    const devHash = deviceFingerprint(ip, userAgent);
+
+    const rlIp = rateLimit(`submit:${ip}`, 10, 60_000);
+    if (!rlIp.allowed) {
+      return {
+        success: false,
+        error: "Terlalu banyak percobaan absen. Coba lagi sebentar.",
+      };
+    }
+
     const session = await prisma.attendanceSession.findUnique({
       where: { qrCode },
       include: {
@@ -125,6 +149,28 @@ export async function submitAttendance(
         data: { status: "EXPIRED" },
       });
       return { success: false, error: "QR Code sudah kedaluwarsa" };
+    }
+
+    // ── Per-session rate limit by IP (very strict — cegah enumerasi) ──
+    const rlSession = rateLimit(`submit:${ip}:${session.id}`, 5, 60_000);
+    if (!rlSession.allowed) {
+      return {
+        success: false,
+        error: "Terlalu banyak percobaan untuk sesi ini. Tunggu sebentar.",
+      };
+    }
+
+    // ── Device-fingerprint lock: 1 device = 1 attendance per session ──
+    // Prevent siswa nakal absenkan teman dari HP/laptop yg sama.
+    const existingFromSameDevice = await prisma.attendance.findFirst({
+      where: { sessionId: session.id, deviceHash: devHash },
+      select: { studentId: true, student: { select: { name: true } } },
+    });
+    if (existingFromSameDevice && existingFromSameDevice.studentId !== studentId) {
+      return {
+        success: false,
+        error: `Perangkat ini sudah dipakai untuk absen atas nama ${existingFromSameDevice.student.name}. Satu HP hanya boleh untuk satu siswa per sesi.`,
+      };
     }
 
     // Verify student belongs to class
@@ -191,9 +237,6 @@ export async function submitAttendance(
     // Simple rule: PRESENT for now (no fixed time threshold in schema)
     const status: "PRESENT" | "LATE" = "PRESENT";
 
-    const hdrs = await headers();
-    const userAgent = hdrs.get("user-agent") ?? null;
-
     await prisma.attendance.create({
       data: {
         sessionId: session.id,
@@ -202,7 +245,10 @@ export async function submitAttendance(
         method: "QR",
         latitude: geo?.latitude,
         longitude: geo?.longitude,
+        accuracy: geo?.accuracy,
         deviceInfo: userAgent,
+        ipAddress: ip,
+        deviceHash: devHash,
       },
     });
 
@@ -217,6 +263,8 @@ export async function submitAttendance(
     });
 
     revalidatePath(`/scan/${qrCode}`);
+    // Invalidate cached reports so admin sees fresh data
+    revalidateTag("reports", "max");
 
     return {
       success: true,

@@ -4,7 +4,7 @@
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/prisma";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { randomUUID } from "crypto";
 import { getJakartaToday } from "@/lib/date";
 
@@ -110,6 +110,7 @@ export async function createAttendanceSession(formData: FormData): Promise<Actio
     });
 
     revalidatePath("/teacher/attendance");
+    revalidateTag("reports", "max");
     return { success: true, data: { sessionId: session.id, qrCode } };
   } catch {
     return { success: false, error: "Gagal membuat sesi absensi" };
@@ -135,6 +136,7 @@ export async function closeSession(sessionId: string): Promise<ActionResult> {
     });
 
     revalidatePath("/teacher/attendance");
+    revalidateTag("reports", "max");
     return { success: true };
   } catch {
     return { success: false, error: "Gagal menutup sesi" };
@@ -159,6 +161,7 @@ export async function cancelSession(sessionId: string): Promise<ActionResult> {
     });
 
     revalidatePath("/teacher/attendance");
+    revalidateTag("reports", "max");
     return { success: true };
   } catch {
     return { success: false, error: "Gagal membatalkan sesi" };
@@ -210,6 +213,7 @@ export async function markAttendance(
     }
 
     revalidatePath("/teacher/attendance");
+    revalidateTag("reports", "max");
     return { success: true };
   } catch {
     return { success: false, error: "Gagal mencatat kehadiran" };
@@ -251,6 +255,7 @@ export async function markAllAbsent(sessionId: string): Promise<ActionResult> {
     });
 
     revalidatePath("/teacher/attendance");
+    revalidateTag("reports", "max");
     return { success: true, data: { count: missingStudents.length } };
   } catch {
     return { success: false, error: "Gagal mencatat absen massal" };
@@ -274,6 +279,7 @@ export async function deleteSession(sessionId: string): Promise<ActionResult> {
     await prisma.attendanceSession.delete({ where: { id: sessionId } });
 
     revalidatePath("/teacher/attendance");
+    revalidateTag("reports", "max");
     return { success: true };
   } catch {
     return { success: false, error: "Gagal menghapus sesi" };

@@ -3,6 +3,7 @@
 // src/app/(dashboard)/admin/reports/actions.ts
 
 import { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/prisma";
 
@@ -72,7 +73,21 @@ const STATUS_KEYS: StatusKey[] = ["PRESENT", "ABSENT", "LATE", "SICK", "PERMIT"]
 
 export async function getReportData(filters: ReportFilters): Promise<ReportData> {
   await requireAdmin();
+  return getCachedReportData(filters);
+}
 
+const getCachedReportData = unstable_cache(
+  async (filters: ReportFilters): Promise<ReportData> => {
+    return computeReportData(filters);
+  },
+  ["report-data"],
+  {
+    tags: ["reports"],
+    revalidate: 60, // 60s TTL fallback
+  }
+);
+
+async function computeReportData(filters: ReportFilters): Promise<ReportData> {
   // Normalize filter dates
   const startDate = filters.startDate ? new Date(filters.startDate) : null;
   let endDate: Date | null = null;
