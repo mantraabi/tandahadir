@@ -9,6 +9,7 @@ import {
   addJakartaDays,
   formatJakartaLongDate,
 } from "@/lib/date";
+import { LicenseBanner } from "@/components/license-banner";
 import { AdminDashboard, type AdminDashboardData } from "./admin-dashboard";
 
 export const dynamic = "force-dynamic";
@@ -154,5 +155,10 @@ export default async function AdminDashboardPage() {
     todayAttendances,
   };
 
-  return <AdminDashboard data={data} />;
+  return (
+    <div className="space-y-6">
+      <LicenseBanner adminLink />
+      <AdminDashboard data={data} />
+    </div>
+  );
 }

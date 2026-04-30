@@ -182,3 +182,64 @@ export async function updateAdminProfile(formData: FormData): Promise<ActionResu
     return { success: false, error: "Gagal menyimpan profil admin" };
   }
 }
+
+// ─── License Activation ───
+
+export async function activateLicense(formData: FormData): Promise<ActionResult> {
+  try {
+    await requireAdmin();
+    const { validateLicenseKey } = await import("@/lib/license/key");
+
+    const rawKey = ((formData.get("key") as string) ?? "").trim();
+    if (!rawKey) {
+      return { success: false, error: "Kunci lisensi tidak boleh kosong" };
+    }
+
+    const result = validateLicenseKey(rawKey);
+    if (!result.valid) {
+      return { success: false, error: result.reason };
+    }
+
+    // Pull current school name to keep license metadata consistent
+    const school = await prisma.school.findFirst({ select: { name: true } });
+    const schoolName = school?.name ?? "TandaHadir";
+
+    const existing = await prisma.license.findFirst({
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (existing) {
+      await prisma.license.update({
+        where: { id: existing.id },
+        data: {
+          key: rawKey.toUpperCase(),
+          schoolName,
+          status: "ACTIVE",
+          licenseEndsAt: result.expiresAt,
+          activatedAt: new Date(),
+        },
+      });
+    } else {
+      // Trial fallback: ensure trialEndsAt is non-null per schema
+      await prisma.license.create({
+        data: {
+          key: rawKey.toUpperCase(),
+          schoolName,
+          status: "ACTIVE",
+          trialEndsAt: result.expiresAt,
+          licenseEndsAt: result.expiresAt,
+          activatedAt: new Date(),
+        },
+      });
+    }
+
+    revalidatePath("/admin/settings");
+    revalidatePath("/admin");
+    revalidatePath("/teacher");
+    revalidatePath("/teacher/attendance");
+    return { success: true };
+  } catch (e) {
+    console.error("[activateLicense]", e);
+    return { success: false, error: "Gagal mengaktivasi lisensi" };
+  }
+}

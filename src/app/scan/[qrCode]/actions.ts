@@ -7,6 +7,7 @@ import { headers, cookies } from "next/headers";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { deviceFingerprint } from "@/lib/device-fingerprint";
+import { getLicenseState, expireStaleLicenses } from "@/lib/license/guard";
 
 type ActionResult = {
   success: boolean;
@@ -124,6 +125,16 @@ export async function submitAttendance(
       return {
         success: false,
         error: "Terlalu banyak percobaan absen. Coba lagi sebentar.",
+      };
+    }
+
+    // ── License gate ──
+    await expireStaleLicenses();
+    const lic = await getLicenseState();
+    if (!lic.canWrite) {
+      return {
+        success: false,
+        error: "Lisensi sekolah sudah kedaluwarsa. Silakan hubungi admin sekolah.",
       };
     }
 

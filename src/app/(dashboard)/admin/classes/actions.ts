@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/prisma";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { requireActiveLicense, LicenseExpiredError } from "@/lib/license/guard";
 
 const classSchema = z.object({
   name: z.string().min(1, "Nama kelas wajib diisi"),
@@ -29,6 +30,7 @@ async function requireAdmin() {
 export async function createClass(formData: FormData): Promise<ActionResult> {
   try {
     await requireAdmin();
+    await requireActiveLicense();
 
     const raw = {
       name: formData.get("name") as string,
@@ -51,7 +53,8 @@ export async function createClass(formData: FormData): Promise<ActionResult> {
 
     revalidatePath("/admin/classes");
     return { success: true };
-  } catch {
+  } catch (e) {
+    if (e instanceof LicenseExpiredError) return { success: false, error: e.message };
     return { success: false, error: "Gagal menambahkan kelas" };
   }
 }

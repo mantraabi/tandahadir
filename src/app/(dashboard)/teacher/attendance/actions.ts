@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db/prisma";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { randomUUID } from "crypto";
 import { getJakartaToday } from "@/lib/date";
+import { requireActiveLicense, LicenseExpiredError } from "@/lib/license/guard";
 
 type ActionResult = {
   success: boolean;
@@ -28,6 +29,7 @@ async function requireTeacher() {
 export async function createAttendanceSession(formData: FormData): Promise<ActionResult> {
   try {
     const teacher = await requireTeacher();
+    await requireActiveLicense();
 
     const classId = formData.get("classId") as string;
     const subject = (formData.get("subject") as string) || null;
@@ -112,7 +114,8 @@ export async function createAttendanceSession(formData: FormData): Promise<Actio
     revalidatePath("/teacher/attendance");
     revalidateTag("reports", "max");
     return { success: true, data: { sessionId: session.id, qrCode } };
-  } catch {
+  } catch (e) {
+    if (e instanceof LicenseExpiredError) return { success: false, error: e.message };
     return { success: false, error: "Gagal membuat sesi absensi" };
   }
 }
@@ -177,6 +180,7 @@ export async function markAttendance(
 ): Promise<ActionResult> {
   try {
     const teacher = await requireTeacher();
+    await requireActiveLicense();
 
     const session = await prisma.attendanceSession.findFirst({
       where: { id: sessionId, createdById: teacher.id as string },
@@ -215,7 +219,8 @@ export async function markAttendance(
     revalidatePath("/teacher/attendance");
     revalidateTag("reports", "max");
     return { success: true };
-  } catch {
+  } catch (e) {
+    if (e instanceof LicenseExpiredError) return { success: false, error: e.message };
     return { success: false, error: "Gagal mencatat kehadiran" };
   }
 }
@@ -225,6 +230,7 @@ export async function markAttendance(
 export async function markAllAbsent(sessionId: string): Promise<ActionResult> {
   try {
     const teacher = await requireTeacher();
+    await requireActiveLicense();
 
     const session = await prisma.attendanceSession.findFirst({
       where: { id: sessionId, createdById: teacher.id as string },
@@ -257,7 +263,8 @@ export async function markAllAbsent(sessionId: string): Promise<ActionResult> {
     revalidatePath("/teacher/attendance");
     revalidateTag("reports", "max");
     return { success: true, data: { count: missingStudents.length } };
-  } catch {
+  } catch (e) {
+    if (e instanceof LicenseExpiredError) return { success: false, error: e.message };
     return { success: false, error: "Gagal mencatat absen massal" };
   }
 }

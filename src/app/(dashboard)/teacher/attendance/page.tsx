@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/prisma";
 import { expireStaleSessions } from "@/lib/expire-sessions";
+import { LicenseBanner } from "@/components/license-banner";
 import { AttendanceClient } from "./attendance-client";
 
 export const dynamic = "force-dynamic";
@@ -74,5 +75,10 @@ export default async function TeacherAttendancePage() {
     defaultRadius: schoolRaw?.defaultRadius ?? null,
   };
 
-  return <AttendanceClient sessions={sessions} classes={classes} school={school} />;
+  return (
+    <div className="space-y-6">
+      <LicenseBanner />
+      <AttendanceClient sessions={sessions} classes={classes} school={school} />
+    </div>
+  );
 }

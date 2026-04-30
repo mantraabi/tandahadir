@@ -22,7 +22,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { updateSchoolProfile, changePassword, updateAdminProfile } from "./actions";
+import { updateSchoolProfile, changePassword, updateAdminProfile, activateLicense } from "./actions";
+import { KeyRound } from "lucide-react";
 
 export type SchoolData = {
   id: string | null;
@@ -571,6 +572,70 @@ function LicenseInfo({ license }: { license: LicenseData | null }) {
           </p>
         </div>
       </div>
+
+      {/* Activation form */}
+      <div className="px-6 pb-6">
+        <LicenseActivateForm />
+      </div>
+    </div>
+  );
+}
+
+/* ─── License Activation Form ─── */
+
+function LicenseActivateForm() {
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError("");
+    const formData = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const result = await activateLicense(formData);
+      if (result.success) {
+        toast.success("Lisensi berhasil diaktivasi");
+        // Reload to refresh license state across the app
+        setTimeout(() => window.location.reload(), 500);
+      } else {
+        setError(result.error ?? "Gagal mengaktivasi");
+      }
+    });
+  }
+
+  return (
+    <div className="border-t border-gray-100 pt-5">
+      <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+        <KeyRound size={14} className="text-[#0d5c63]" />
+        Aktivasi Kunci Lisensi
+      </h3>
+      <p className="text-xs text-gray-400 mt-1">
+        Masukkan kunci lisensi yang diberikan oleh tim TandaHadir untuk mengaktifkan atau memperpanjang langganan.
+      </p>
+      <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+        <input
+          name="key"
+          type="text"
+          required
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="TH-XXXXXXXX-YYYYMMDD-XXXXXXXXXX"
+          className="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-sm font-mono outline-none focus:border-[#0d5c63] focus:bg-white focus:ring-2 focus:ring-[#0d5c63]/20 transition-all uppercase tracking-wider"
+        />
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">
+            {error}
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={isPending}
+          className="px-5 py-2 rounded-lg bg-[#0d5c63] text-white text-sm font-semibold hover:bg-[#0a4a50] transition-colors disabled:opacity-60 inline-flex items-center gap-2"
+        >
+          {isPending ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+          Aktivasi
+        </button>
+      </form>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   formatJakartaLongDate,
   jakartaDateKey,
 } from "@/lib/date";
+import { LicenseBanner } from "@/components/license-banner";
 import { TeacherDashboard, type TeacherDashboardData } from "./teacher-dashboard";
 
 export const dynamic = "force-dynamic";
@@ -188,5 +189,10 @@ export default async function TeacherDashboardPage() {
     classes,
   };
 
-  return <TeacherDashboard data={data} />;
+  return (
+    <div className="space-y-6">
+      <LicenseBanner />
+      <TeacherDashboard data={data} />
+    </div>
+  );
 }
