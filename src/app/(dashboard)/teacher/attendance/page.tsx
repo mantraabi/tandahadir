@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/prisma";
+import { expireStaleSessions } from "@/lib/expire-sessions";
 import { AttendanceClient } from "./attendance-client";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,9 @@ export default async function TeacherAttendancePage() {
   }
 
   const teacherId = session.user.id as string;
+
+  // Flip ACTIVE -> EXPIRED for sessions whose QR window has passed
+  await expireStaleSessions();
 
   const [sessionsRaw, classesRaw, schoolRaw] = await Promise.all([
     prisma.attendanceSession.findMany({
